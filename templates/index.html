@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetSentinel - Network Risk Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/v/bs5/dt-2.0.5/datatables.min.css" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .card { margin-bottom: 20px; box-shadow: 0 .125rem .25rem rgba(0,0,0,.075); }
+        .risk-critical { background-color: #f8d7da; }
+        .risk-high { background-color: #fff3cd; }
+        .risk-medium { background-color: #e0f2fe; }
+        .risk-low { background-color: #d4edda; }
+        #toastContainer { position: fixed; top: 20px; right: 20px; z-index: 1050; }
+        .security-card { border-left: 4px solid #6c757d; }
+        .security-card.secure { border-left-color: #198754; }
+        .security-card.risk { border-left-color: #dc3545; }
+        .security-card.warning { border-left-color: #ffc107; }
+        .system-info-table th { width: 40%; }
+        .fix-steps { background-color: #f8f9fa; border-left: 4px solid #0d6efd; }
+        .fix-step { padding: 8px 12px; margin: 5px 0; background: white; border-radius: 5px; }
+        .status-badge { min-width: 80px; text-align: center; }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-shield-alt me-2"></i><strong>NetSentinel</strong> - Network Risk Dashboard
+            </a>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <!-- Main Dashboard Row -->
+        <div class="row">
+            <!-- Main Content Column -->
+            <div class="col-lg-12">
+                <!-- System Information Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-info-circle me-2"></i>System Information & Security Assessment
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <button class="btn btn-primary btn-sm" onclick="loadSystemInfo()">
+                                <i class="fas fa-sync-alt me-1"></i>Refresh System Info
+                            </button>
+                            <span class="badge bg-secondary" id="systemInfoTimestamp">Last refresh: Never</span>
+                        </div>
+                        
+                        <div id="systemInfoContent">
+                            <!-- Content will be loaded here -->
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-shield-alt fa-3x mb-3 text-primary"></i>
+                                <h5>Welcome to NetSentinel</h5>
+                                <p>Click "Refresh System Info" to perform security assessment</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Port Scanner Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="fas fa-plug me-2"></i>Live Port & Service Scanner</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <button class="btn btn-primary btn-sm" onclick="scanPorts()">
+                                <i class="fas fa-search me-1"></i>Scan Open Ports
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="portResultsTable" class="table table-sm table-hover" style="width:100%">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Port</th>
+                                        <th>Protocol</th>
+                                        <th>Status</th>
+                                        <th>Process Name</th>
+                                        <th>PID</th>
+                                        <th>Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="6" class="text-center">No data available. Please run a scan.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Firewall Rules Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="fas fa-fire me-2"></i>Interactive Firewall Rule Manager</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <button class="btn btn-primary btn-sm" onclick="loadFirewallRules()">
+                                <i class="fas fa-sync-alt me-1"></i>Load Firewall Rules
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="firewallRulesTable" class="table table-sm table-hover" style="width:100%">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Display Name</th>
+                                        <th>Direction</th>
+                                        <th>Action</th>
+                                        <th>Profile</th>
+                                        <th>Enabled</th>
+                                        <th>Risk</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="7" class="text-center">No data available. Please load rules.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- One-Click Hardening Card -->
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="card-title mb-0"><i class="fas fa-wrench me-2"></i>One-Click Security Hardening</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Click a button below to automatically remediate a common security risk.</p>
+                        <div class="row">
+                            <div class="col-md-4 mb-2">
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-outline-danger" onclick="hardenDisableGuest()">
+                                        <i class="fas fa-user-slash me-2"></i>Disable Guest Account
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-outline-danger" onclick="hardenEnableFirewall()">
+                                        <i class="fas fa-shield-alt me-2"></i>Enable Windows Firewall
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-outline-danger" onclick="hardenDisableTelnet()">
+                                        <i class="fas fa-ban me-2"></i>Disable Telnet Service
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast for Notifications -->
+    <div id="toastContainer"></div>
+
+    <!-- JavaScript Libraries -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/v/bs5/dt-2.0.5/datatables.min.js"></script>
+
+    <!-- Our Custom JavaScript -->
+    <script>
+        function showToast(message, type = 'info') {
+            const toast = $(`<div class="toast align-items-center text-white bg-${type} border-0" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body">${message}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            </div>`);
+
+            $('#toastContainer').append(toast);
+            new bootstrap.Toast(toast).show();
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        // Placeholder functions for button clicks
+        function runFullScan() { showToast('Full assessment started...', 'info'); }
+        function generateReport() { showToast('Generating PDF report...', 'success'); }
+        function scanPorts() { 
+            showToast('Scanning for open ports...', 'info');
+            $('#portResultsTable').DataTable().clear().draw();
+        }
+        function loadFirewallRules() { 
+            showToast('Loading firewall rules...', 'info');
+            $('#firewallRulesTable').DataTable().clear().draw();
+        }
+
+        // Placeholder functions for hardening actions
+        function hardenDisableGuest() {
+            if(confirm('Are you sure you want to disable the Guest account?')) {
+                showToast('Disabling Guest account...', 'warning');
+            }
+        }
+        function hardenEnableFirewall() {
+            if(confirm('Are you sure you want to enable the Windows Firewall for all profiles?')) {
+                showToast('Enabling Windows Firewall...', 'warning');
+            }
+        }
+        function hardenDisableTelnet() {
+            if(confirm('Are you sure you want to disable the Telnet service? This cannot be undone.')) {
+                showToast('Disabling Telnet service...', 'warning');
+            }
+        }
+
+        // System Information Functions
+        function loadSystemInfo() {
+            showToast('Loading system information...', 'info');
+            
+            fetch('/api/system-info')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displaySystemInfo(data);
+                        showToast('System information loaded successfully!', 'success');
+                    } else {
+                        showToast('Error loading system information: ' + data.error, 'danger');
+                    }
+                })
+                .catch(error => {
+                    showToast('Failed to load system information', 'danger');
+                    console.error('Error:', error);
+                });
+        }
+
+        function getRemediationSteps(issueType) {
+            const steps = {
+                'remote_desktop': [
+                    '1. Press Win + R, type "sysdm.cpl" and press Enter',
+                    '2. Go to "Remote" tab',
+                    '3. Select "Don\'t allow remote connections to this computer"',
+                    '4. Click Apply and OK',
+                    '5. Alternatively, use PowerShell: Set-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server" -Name "fDenyTSConnections" -Value 1',
+                    '6. Restart computer for changes to take effect'
+                ],
+                'firewall': [
+                    '1. Open Windows Security from Start Menu',
+                    '2. Click on "Firewall & network protection"',
+                    '3. Ensure all profiles (Domain, Private, Public) show "Firewall is on"',
+                    '4. For any disabled profile, click on it and toggle "Windows Defender Firewall" to On',
+                    '5. Use PowerShell: Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True',
+                    '6. Verify with: Get-NetFirewallProfile | Select-Object Name, Enabled'
+                ]
+            };
+            return steps[issueType] || [];
+        }
+
+        function displaySystemInfo(data) {
+            let remediationHtml = '';
+            const issues = [];
+
+            // Check for issues and build remediation section
+            if (data.rdp_status && data.rdp_status.enabled) {
+                issues.push('remote_desktop');
+            }
+            if (data.firewall_status) {
+                const allEnabled = Object.values(data.firewall_status).every(status => status);
+                if (!allEnabled) {
+                    issues.push('firewall');
+                }
+            }
+
+            if (issues.length > 0) {
+                remediationHtml = `
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="card border-warning">
+                                <div class="card-header bg-warning text-dark">
+                                    <h6 class="mb-0"><i class="fas fa-tools me-2"></i>Recommended Fixes</h6>
+                                </div>
+                                <div class="card-body">
+                `;
+
+                issues.forEach(issue => {
+                    const steps = getRemediationSteps(issue);
+                    const title = issue === 'remote_desktop' ? 'Disable Remote Desktop' : 'Enable Windows Firewall';
+                    
+                    remediationHtml += `
+                        <div class="mb-4">
+                            <h6 class="text-primary">${title}</h6>
+                            <div class="fix-steps p-3">
+                                ${steps.map(step => `
+                                    <div class="fix-step">${step}</div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                remediationHtml += `
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Create firewall status HTML
+            let firewallHtml = '';
+            if (data.firewall_status && !data.firewall_status.error) {
+                const allEnabled = Object.values(data.firewall_status).every(status => status);
+                const overallStatusClass = allEnabled ? 'secure' : 'warning';
+                
+                firewallHtml = `
+                    <div class="col-md-6 mb-3">
+                        <div class="card security-card ${overallStatusClass} h-100">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="fas fa-fire me-2"></i>Firewall Status</h6>
+                                <div class="row">
+                `;
+                
+                for (const [profile, enabled] of Object.entries(data.firewall_status)) {
+                    const statusClass = enabled ? 'success' : 'danger';
+                    const statusIcon = enabled ? 'fa-check-circle' : 'fa-times-circle';
+                    const statusText = enabled ? 'Enabled' : 'Disabled';
+                    
+                    firewallHtml += `
+                        <div class="col-12 mb-2">
+                            <div class="d-flex justify-content-between align-items-center p-2 border rounded">
+                                <span class="text-${statusClass}">
+                                    <i class="fas ${statusIcon} me-1"></i>
+                                    ${profile}
+                                </span>
+                                <span class="badge bg-${statusClass} status-badge">${statusText}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                firewallHtml += `
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-${allEnabled ? 'success' : 'warning'}">
+                                        <i class="fas ${allEnabled ? 'fa-shield-alt' : 'fa-exclamation-triangle'} me-1"></i>
+                                        ${allEnabled ? 'All firewall profiles are secured' : 'Firewall not fully enabled'}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Create Remote Desktop status HTML
+            let rdpHtml = '';
+            if (data.rdp_status) {
+                const isEnabled = data.rdp_status.enabled;
+                const statusClass = isEnabled ? 'warning' : 'secure';
+                const statusIcon = isEnabled ? 'fa-exclamation-triangle' : 'fa-check-circle';
+                
+                rdpHtml = `
+                    <div class="col-md-6 mb-3">
+                        <div class="card security-card ${statusClass} h-100">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="fas fa-desktop me-2"></i>Remote Desktop</h6>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span>
+                                        <i class="fas ${statusIcon} me-2 ${isEnabled ? 'text-warning' : 'text-success'}"></i>
+                                        ${data.rdp_status.status}
+                                    </span>
+                                    <span class="badge bg-${isEnabled ? 'warning' : 'success'} status-badge">
+                                        ${isEnabled ? 'Enabled' : 'Disabled'}
+                                    </span>
+                                </div>
+                                ${isEnabled ? '<div class="alert alert-warning mt-2 mb-0 py-1"><small><i class="fas fa-exclamation-triangle me-1"></i>Remote access presents security risk</small></div>' : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Create risk summary HTML
+            let riskSummaryHtml = '';
+            if (data.risk_findings && data.risk_findings.length > 0) {
+                riskSummaryHtml = `
+                    <div class="col-12 mb-3">
+                        <div class="card security-card risk">
+                            <div class="card-body">
+                                <h6 class="card-title text-danger"><i class="fas fa-exclamation-triangle me-2"></i>Security Risks Found</h6>
+                                <div class="alert alert-danger">
+                                    <i class="fas fa-shield-alt me-2"></i>
+                                    <strong>Total Risks:</strong> ${data.total_risks}
+                                    <div class="mt-2">
+                                        ${data.risk_findings.map(risk => `
+                                            <div class="mb-1">
+                                                <i class="fas fa-arrow-right text-danger me-1"></i>
+                                                <small>${risk}</small>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const content = `
+                <!-- System Overview -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card security-card">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="fas fa-desktop me-2"></i>System Overview</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm system-info-table">
+                                        <tbody>
+                                            <tr><th>OS Name</th><td>${data.system_info['OS Name'] || 'N/A'}</td></tr>
+                                            <tr><th>OS Version</th><td>${data.system_info['OS Version'] || 'N/A'}</td></tr>
+                                            <tr><th>System Type</th><td>${data.system_info['System Type'] || 'N/A'}</td></tr>
+                                            <tr><th>Total Memory</th><td>${data.system_info['Total Physical Memory'] || 'N/A'}</td></tr>
+                                            <tr><th>Available Memory</th><td>${data.system_info['Available Physical Memory'] || 'N/A'}</td></tr>
+                                            <tr><th>Uptime</th><td>${data.uptime || 'N/A'}</td></tr>
+                                            <tr><th>Boot Time</th><td>${data.system_info['System Boot Time'] || 'N/A'}</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security Status Cards -->
+                <div class="row">
+                    ${firewallHtml}
+                    ${rdpHtml}
+                </div>
+
+                <!-- Risk Summary -->
+                ${riskSummaryHtml}
+
+                <!-- Remediation Steps -->
+                ${remediationHtml}
+            `;
+            
+            document.getElementById('systemInfoContent').innerHTML = content;
+            document.getElementById('systemInfoTimestamp').textContent = 
+                `Last refresh: ${data.timestamp}`;
+        }
+
+        function showSystemInfo() {
+            loadSystemInfo();
+        }
+
+        // Initialize DataTables with proper empty data
+        $(document).ready(function() {
+            $('#portResultsTable').DataTable({
+                data: [],
+                columns: [
+                    { title: "Port" },
+                    { title: "Protocol" },
+                    { title: "Status" },
+                    { title: "Process Name" },
+                    { title: "PID" },
+                    { title: "Risk" }
+                ]
+            });
+            
+            $('#firewallRulesTable').DataTable({
+                data: [],
+                columns: [
+                    { title: "Display Name" },
+                    { title: "Direction" },
+                    { title: "Action" },
+                    { title: "Profile" },
+                    { title: "Enabled" },
+                    { title: "Risk" },
+                    { title: "Action" }
+                ]
+            });
+        });
+    </script>
+</body>
+</html>
