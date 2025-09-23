@@ -36,17 +36,69 @@ def parse_system_info(output):
                 
     return info
 
+    
 def get_uptime(boot_time_str):
-    """Calculate system uptime from boot time string."""
+    """Calculate system uptime using multiple reliable methods."""
     try:
-        boot_time = datetime.strptime(boot_time_str, '%m/%d/%Y, %I:%M:%S %p')
-        uptime = datetime.now() - boot_time
-        days = uptime.days
-        hours, remainder = divmod(uptime.seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{days}d {hours}h {minutes}m"
-    except:
-        return "Could not calculate"
+        # Method 1: Direct PowerShell uptime calculation (most reliable)
+        ps_command = '''
+        powershell "& {
+            $bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+            $uptime = (Get-Date) - $bootTime
+            Write-Output (\\\"{0}d {1}h {2}m\\\".Format($uptime.Days, $uptime.Hours, $uptime.Minutes))
+        }"
+        '''
+        result = run_command(ps_command)
+        
+        if result and not result.startswith('Error'):
+            result = result.strip()
+            # Validate the format looks correct
+            if any(x in result for x in ['d', 'h', 'm']):
+                return result
+        
+        # Method 2: If PowerShell fails, try the original date parsing with better error handling
+        if boot_time_str and boot_time_str != "N/A":
+            boot_time_str = boot_time_str.strip()
+            
+            # Try common date formats
+            formats_to_try = [
+                '%m/%d/%Y, %I:%M:%S %p',    # 12/15/2023, 02:30:45 PM
+                '%m/%d/%Y, %H:%M:%S',       # 12/15/2023, 14:30:45
+                '%Y-%m-%d, %I:%M:%S %p',    # 2023-12-15, 02:30:45 PM
+                '%Y-%m-%d, %H:%M:%S',       # 2023-12-15, 14:30:45
+            ]
+            
+            for fmt in formats_to_try:
+                try:
+                    boot_time = datetime.strptime(boot_time_str, fmt)
+                    uptime = datetime.now() - boot_time
+                    days = uptime.days
+                    hours, remainder = divmod(uptime.seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    return f"{days}d {hours}h {minutes}m"
+                except ValueError:
+                    continue
+        
+        # Method 3: Fallback to WMIC
+        wmic_result = run_command('wmic os get lastbootuptime /format:value')
+        if 'LastBootUpTime' in wmic_result:
+            for line in wmic_result.split('\n'):
+                if 'LastBootUpTime' in line:
+                    time_str = line.split('=')[1].strip()
+                    # Parse: 20231215143045.500000+000
+                    year, month, day = int(time_str[:4]), int(time_str[4:6]), int(time_str[6:8])
+                    hour, minute, second = int(time_str[8:10]), int(time_str[10:12]), int(time_str[12:14])
+                    boot_time = datetime(year, month, day, hour, minute, second)
+                    uptime = datetime.now() - boot_time
+                    days = uptime.days
+                    hours, remainder = divmod(uptime.seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    return f"{days}d {hours}h {minutes}m"
+        
+        return "N/A"
+        
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 def check_windows_version_vulnerabilities(os_version):
     """Basic check for well-known Windows vulnerabilities based on version."""
