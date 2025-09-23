@@ -210,7 +210,7 @@ def get_firewall_rules_api():
                 'description': rule.get('Description', 'N/A'),
                 'direction': rule.get('Direction', 'N/A'),
                 'action': rule.get('Action', 'N/A'),
-                'enabled': enabled_status,  # fixed here
+                'enabled': enabled_status,  
                 'profile': rule.get('Profile', 'N/A'),
                 'protocol': rule.get('Protocol', 'N/A'),
                 'local_port': rule.get('LocalPort', 'N/A'),
