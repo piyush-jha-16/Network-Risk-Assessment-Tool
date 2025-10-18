@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import subprocess
 from datetime import datetime
 import json
@@ -283,6 +283,35 @@ def get_firewall_rules_api():
         response = {'success': False, 'error': str(e)}
     return jsonify(response)
 
+@app.route('/api/firewall-rule/toggle', methods=['POST'])
+def toggle_firewall_rule():
+    try:
+        data = request.get_json()
+        rule_name = data.get('rule_name')
+        enable = data.get('enable', True)
+        
+        if not rule_name:
+            return jsonify({'success': False, 'error': 'Rule name is required'})
+        
+        # PowerShell command to enable/disable firewall rule
+        action = "Enable" if enable else "Disable"
+        command = f'powershell "Set-NetFirewallRule -Name \'{rule_name}\' -Enabled {enable}"'
+        
+        result = run_command(command)
+        
+        # Check if the command was successful
+        if "Error" not in result:
+            return jsonify({
+                'success': True, 
+                'message': f'Firewall rule {action}d successfully',
+                'rule_name': rule_name,
+                'enabled': enable
+            })
+        else:
+            return jsonify({'success': False, 'error': result})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))  # Use Render's port
