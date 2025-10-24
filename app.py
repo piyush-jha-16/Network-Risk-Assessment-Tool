@@ -1,8 +1,10 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import subprocess
 from datetime import datetime
 import json
 import os
+from subprocess import run, PIPE
+
 
 app = Flask(__name__)
 
@@ -152,46 +154,108 @@ def check_remote_desktop():
         return {'error': str(e)}
 
 # 🔎 GET FIREWALL RULES
+
 def get_firewall_rules():
+    """Fetch firewall rules without requiring admin privileges."""
+    ps_command = r'''
+    $rules = Get-NetFirewallRule | Select-Object `
+        Name, DisplayName, Description, Direction, Action, Enabled, Profile
+    $rules | ConvertTo-Json -Depth 4
+    '''
+
+    command = ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_command]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    if result.stderr.strip():
+        print("PowerShell warning:", result.stderr)
+
     try:
-        command = (
-            'powershell "Get-NetFirewallRule | '
-            'Select-Object Name, DisplayName, Description, Direction, Action, Enabled, Profile, '
-            '@{Name=\'Protocol\'; Expression={$_.Protocol}}, '
-            '@{Name=\'LocalPort\'; Expression={$_.LocalPort}}, '
-            '@{Name=\'RemotePort\'; Expression={$_.RemotePort}}, '
-            '@{Name=\'Program\'; Expression={$_.Program}}, '
-            '@{Name=\'Service\'; Expression={$_.Service}} | '
-            'ConvertTo-Json -Depth 3"'
-        )
-        result = run_command(command)
-        rules = json.loads(result)
-        if not isinstance(rules, list):
-            rules = [rules]
-        return rules
+        data = json.loads(result.stdout.strip() or "[]")
+        if not isinstance(data, list):
+            data = [data]
+
+        # Add safe default values for missing fields
+        for rule in data:
+            rule.setdefault('Protocol', 'Any')
+            rule.setdefault('LocalPort', 'Any')
+            rule.setdefault('RemotePort', 'Any')
+
+        return data
     except Exception as e:
-        return {'error': str(e)}
+        print("JSON error:", e)
+        print("Raw output:", result.stdout)
+        return []
+
+
+
 
 def analyze_firewall_rule_risk(rule):
-    """Analyze risk level for a firewall rule"""
+    """Analyze risk level for a firewall rule with enum mapping and normalization."""
     risk_level = "Low"
     reasons = []
 
-    enabled_value = str(rule.get('Enabled')).lower()
-    if enabled_value == 'true':
-        if rule.get('Action') == 'Allow':
-            if rule.get('Direction') == 'Inbound':
-                if rule.get('LocalPort') in [None, 'Any']:
-                    risk_level = "High"
-                    reasons.append("Unrestricted inbound access")
-                risky_ports = ['3389', '23', '21', '135', '139', '445', '1433']
-                if any(port in str(rule.get('LocalPort', '')) for port in risky_ports):
-                    risk_level = "Medium"
-                    reasons.append("Risky port exposed")
-                if 'Public' in str(rule.get('Profile', '')):
-                    risk_level = "High"
-                    reasons.append("Public profile inbound rule")
+    # --- Maps for numeric or string enums ---
+    direction_map = {
+        '1': 'Inbound', '2': 'Outbound',
+        'Inbound': 'Inbound', 'Outbound': 'Outbound'
+    }
+    action_map = {
+        '1': 'Block', '2': 'Allow',
+        'Block': 'Block', 'Allow': 'Allow'
+    }
+    profile_map = {
+        '1': 'Domain', '2': 'Private', '3': 'Public',
+        'Domain': 'Domain', 'Private': 'Private', 'Public': 'Public'
+    }
+
+    # --- Normalize fields ---
+    direction = direction_map.get(str(rule.get('Direction', '')).strip(), 'Unknown')
+    action = action_map.get(str(rule.get('Action', '')).strip(), 'Unknown')
+    profile_raw = str(rule.get('Profile', ''))
+    profiles = [profile_map.get(p.strip(), p.strip()) for p in profile_raw.split(',')]
+    profile_text = ', '.join(profiles)
+
+    enabled_value = str(rule.get('Enabled', '')).strip().lower()
+    local_port = str(rule.get('LocalPort', 'any')).strip().lower()
+
+    # Debug print – check actual data
+    # print(f"DEBUG RULE: {rule}")
+    # print(f"→ Parsed direction={direction}, action={action}, profile={profile_text}, port={local_port}")
+
+    # --- Skip disabled rules ---
+    if enabled_value not in ('true', 'yes', '1'):
+        return {'risk_level': 'Low', 'reasons': ['Rule is disabled']}
+
+    # --- Inbound allow rules are risky ---
+    if action == 'Allow' and direction == 'Inbound':
+        risky_ports = ['3389', '23', '21', '135', '139', '445', '1433']
+
+        if local_port in ('any', '*', '', 'none'):
+            risk_level = "High"
+            reasons.append("Unrestricted inbound access")
+
+        if any(p in local_port for p in risky_ports):
+            risk_level = "Medium"
+            reasons.append(f"Risky port exposed ({local_port})")
+
+        if 'public' in profile_text.lower():
+            risk_level = "High"
+            reasons.append("Public profile inbound rule")
+
+    elif action == 'Allow' and direction == 'Outbound':
+        reasons.append("Outbound allowed (generally safe)")
+
+    elif action == 'Block':
+        reasons.append("Blocks traffic (safe rule)")
+
+    if not reasons:
+        reasons.append("No significant risk factors detected")
+
     return {'risk_level': risk_level, 'reasons': reasons}
+
+
+    
+
 
 @app.route('/')
 def index():
@@ -283,7 +347,36 @@ def get_firewall_rules_api():
         response = {'success': False, 'error': str(e)}
     return jsonify(response)
 
+@app.route('/api/firewall-rule/toggle', methods=['POST'])
+def toggle_firewall_rule():
+    try:
+        data = request.get_json()
+        rule_name = data.get('rule_name')
+        enable = data.get('enable', True)
+        
+        if not rule_name:
+            return jsonify({'success': False, 'error': 'Rule name is required'})
+        
+        # PowerShell command to enable/disable firewall rule
+        action = "Enable" if enable else "Disable"
+        command = f'powershell "Set-NetFirewallRule -Name \'{rule_name}\' -Enabled {enable}"'
+        
+        result = run_command(command)
+        
+        # Check if the command was successful
+        if "Error" not in result:
+            return jsonify({
+                'success': True, 
+                'message': f'Firewall rule {action}d successfully',
+                'rule_name': rule_name,
+                'enabled': enable
+            })
+        else:
+            return jsonify({'success': False, 'error': result})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))  # Use Render's port
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=True)
