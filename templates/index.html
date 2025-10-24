@@ -23,6 +23,54 @@
         .fix-steps { background-color: #f8f9fa; border-left: 4px solid #0d6efd; }
         .fix-step { padding: 8px 12px; margin: 5px 0; background: white; border-radius: 5px; }
         .status-badge { min-width: 80px; text-align: center; }
+        
+        /* Generate Report Button Styles */
+        #generateReportBtn {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #generateReportBtn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        #generateReportBtn:not(:disabled):hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        #generateReportBtn:not(:disabled):active {
+            transform: translateY(-1px);
+            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
+        }
+        
+        /* Animation for the button when enabled */
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(13, 110, 253, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0); }
+        }
+        
+        .pulse-animation {
+            animation: pulse 2s infinite;
+        }
+        
+        /* Success animation */
+        @keyframes success {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .success-animation {
+            animation: success 0.5s ease;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -66,37 +114,6 @@
                     </div>
                 </div>
 
-                <!-- Port Scanner Card -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0"><i class="fas fa-plug me-2"></i>Live Port & Service Scanner</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <button class="btn btn-primary btn-sm" onclick="scanPorts()">
-                                <i class="fas fa-search me-1"></i>Scan Open Ports
-                            </button>
-                        </div>
-                        <div class="table-responsive">
-                            <table id="portResultsTable" class="table table-sm table-hover" style="width:100%">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Port</th>
-                                        <th>Protocol</th>
-                                        <th>Status</th>
-                                        <th>Process Name</th>
-                                        <th>PID</th>
-                                        <th>Risk</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr><td colspan="6" class="text-center">Please click on Scan Open Ports.</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Firewall Rules Card -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -129,8 +146,39 @@
                     </div>
                 </div>
 
+                <!-- Port Scanner Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="fas fa-plug me-2"></i>Live Port & Service Scanner</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <button class="btn btn-primary btn-sm" onclick="scanPorts()">
+                                <i class="fas fa-search me-1"></i>Scan Open Ports
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="portResultsTable" class="table table-sm table-hover" style="width:100%">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Port</th>
+                                        <th>Protocol</th>
+                                        <th>Status</th>
+                                        <th>Process Name</th>
+                                        <th>PID</th>
+                                        <th>Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="6" class="text-center">Please click on Scan Open Ports.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- One-Click Hardening Card -->
-                <div class="card">
+                <div class="card mb-4">
                     <div class="card-header bg-success text-white">
                         <h5 class="card-title mb-0"><i class="fas fa-wrench me-2"></i>One-Click Security Hardening</h5>
                     </div>
@@ -161,6 +209,15 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Generate Report Button -->
+                <div class="card">
+                    <div class="card-body p-0">
+                        <button id="generateReportBtn" class="btn btn-primary" disabled onclick="generateReport()">
+                            <i class="fas fa-file-pdf me-2"></i>Generate Security Assessment Report
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -174,6 +231,9 @@
     <script src="https://cdn.datatables.net/v/bs5/dt-2.0.5/datatables.min.js"></script>
 
     <script>
+    // Track if any scans have been run
+    let scanCompleted = false;
+    
     function showToast(message, type = 'info') {
         const toast = $(`<div class="toast align-items-center text-white bg-${type} border-0" role="alert">
             <div class="d-flex">
@@ -186,13 +246,43 @@
         new bootstrap.Toast(toast).show();
         setTimeout(() => toast.remove(), 5000);
     }
+    
+    // Enable the Generate Report button when a scan is completed
+    function enableGenerateReportButton() {
+        if (!scanCompleted) {
+            scanCompleted = true;
+            const reportBtn = document.getElementById('generateReportBtn');
+            reportBtn.disabled = false;
+            reportBtn.classList.add('pulse-animation');
+        }
+    }
 
     // Placeholder functions for button clicks
-    function runFullScan() { showToast('Full assessment started...', 'info'); }
-    function generateReport() { showToast('Generating PDF report...', 'success'); }
+    function runFullScan() { 
+        showToast('Full assessment started...', 'info');
+        enableGenerateReportButton();
+    }
+    
+    function generateReport() {
+        if (!scanCompleted) return;
+        
+        const reportBtn = document.getElementById('generateReportBtn');
+        reportBtn.classList.remove('pulse-animation');
+        reportBtn.classList.add('success-animation');
+        
+        showToast('Generating PDF report...', 'success');
+        
+        // Reset animation after it completes
+        setTimeout(() => {
+            reportBtn.classList.remove('success-animation');
+            reportBtn.classList.add('pulse-animation');
+        }, 500);
+    }
+    
     function scanPorts() { 
         showToast('Scanning for open ports...', 'info');
         $('#portResultsTable').DataTable().clear().draw();
+        enableGenerateReportButton();
     }
 
     // Firewall Rules Functions
@@ -205,6 +295,7 @@
                 if (data.success) {
                     displayFirewallRules(data);
                     showToast('Firewall rules loaded successfully!', 'success');
+                    enableGenerateReportButton();
                 } else {
                     showToast('Error loading firewall rules: ' + data.error, 'danger');
                     $('#firewallRulesTable').DataTable().clear().draw();
@@ -386,6 +477,7 @@
                 if (data.success) {
                     displaySystemInfo(data);
                     showToast('System information loaded successfully!', 'success');
+                    enableGenerateReportButton();
                 } else {
                     showToast('Error loading system information: ' + data.error, 'danger');
                 }

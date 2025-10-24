@@ -379,4 +379,4 @@ def toggle_firewall_rule():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))  # Use Render's port
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=True)
