@@ -3,7 +3,7 @@ import subprocess
 from datetime import datetime
 import json
 import os
-from subprocess import run, PIPE
+from subprocess import PIPE
 
 
 app = Flask(__name__)
@@ -42,45 +42,6 @@ def parse_system_info(output):
 def get_uptime(boot_time_str):
     """Calculate system uptime using multiple reliable methods."""
     try:
-        # Method 1: Direct PowerShell uptime calculation (most reliable)
-        ps_command = '''
-        powershell "& {
-            $bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-            $uptime = (Get-Date) - $bootTime
-            Write-Output (\\\"{0}d {1}h {2}m\\\".Format($uptime.Days, $uptime.Hours, $uptime.Minutes))
-        }"
-        '''
-        result = run_command(ps_command)
-        
-        if result and not result.startswith('Error'):
-            result = result.strip()
-            # Validate the format looks correct
-            if any(x in result for x in ['d', 'h', 'm']):
-                return result
-        
-        # Method 2: If PowerShell fails, try the original date parsing with better error handling
-        if boot_time_str and boot_time_str != "N/A":
-            boot_time_str = boot_time_str.strip()
-            
-            # Try common date formats
-            formats_to_try = [
-                '%m/%d/%Y, %I:%M:%S %p',    # 12/15/2023, 02:30:45 PM
-                '%m/%d/%Y, %H:%M:%S',       # 12/15/2023, 14:30:45
-                '%Y-%m-%d, %I:%M:%S %p',    # 2023-12-15, 02:30:45 PM
-                '%Y-%m-%d, %H:%M:%S',       # 2023-12-15, 14:30:45
-            ]
-            
-            for fmt in formats_to_try:
-                try:
-                    boot_time = datetime.strptime(boot_time_str, fmt)
-                    uptime = datetime.now() - boot_time
-                    days = uptime.days
-                    hours, remainder = divmod(uptime.seconds, 3600)
-                    minutes, seconds = divmod(remainder, 60)
-                    return f"{days}d {hours}h {minutes}m"
-                except ValueError:
-                    continue
-        
         # Method 3: Fallback to WMIC
         wmic_result = run_command('wmic os get lastbootuptime /format:value')
         if 'LastBootUpTime' in wmic_result:
