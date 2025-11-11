@@ -232,21 +232,40 @@
     }
 
     // Placeholder function for report generation
-    function generateReport() {
-        if (!scanCompleted) return;
-        
-        const reportBtn = document.getElementById('generateReportBtn');
-        reportBtn.classList.remove('pulse-animation');
-        reportBtn.classList.add('success-animation');
-        
-        showToast('Generating PDF report...', 'success');
-        
-        // Reset animation after it completes
-        setTimeout(() => {
-            reportBtn.classList.remove('success-animation');
-            reportBtn.classList.add('pulse-animation');
-        }, 500);
+   async function generateReport() {
+        try {
+            showToast('Generating security assessment report...');
+            const response = await fetch('/api/generate-report');
+
+            if (!response.ok) throw new Error('Failed to generate report');
+
+            // Create a temporary blob and trigger download
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+
+            // Extract filename from content-disposition header
+            const disposition = response.headers.get('Content-Disposition');
+            let filename = 'network_risk_report.txt';
+            if (disposition && disposition.includes('filename=')) {
+                filename = disposition.split('filename=')[1].replace(/["']/g, '');
+            }
+
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+
+            // Cleanup
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+            showToast(`Report downloaded: ${filename}`, 'success');
+        } catch (err) {
+            showToast(`Failed to generate report: ${err.message}`, 'error');
+        }
     }
+
     
     // Port Scanning Function
     function scanPorts() { 

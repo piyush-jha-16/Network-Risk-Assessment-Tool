@@ -3,6 +3,20 @@ import subprocess
 from datetime import datetime
 import json
 import os
+from time import time
+from flask import send_file
+
+
+# Simple in-memory cache
+CACHE = {
+    "system_info": None,
+    "firewall_rules": None,
+    "port_scan": None,
+    "timestamp": 0
+}
+
+CACHE_TTL = 300  # 5 minutes in seconds
+
 
 app = Flask(__name__)
 
@@ -327,6 +341,8 @@ def get_system_info():
             'total_risks': len(risk_findings),
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
+        CACHE["system_info"] = response
+        CACHE["timestamp"] = time()
     except Exception as e:
         response = {'success': False, 'error': str(e)}
     return jsonify(response)
@@ -374,6 +390,10 @@ def get_firewall_rules_api():
         }
     except Exception as e:
         response = {'success': False, 'error': str(e)}
+    if response.get("success"):
+        CACHE["firewall_rules"] = response
+        CACHE["timestamp"] = time()
+
     return jsonify(response)
 
 # PORT SCAN API ENDPOINT - Added from friend's code
@@ -390,6 +410,10 @@ def get_port_scan():
         }
     except Exception as e:
         response = {'success': False, 'error': str(e)}
+    if response.get("success"):
+        CACHE["port_scan"] = response
+        CACHE["timestamp"] = time()
+
     return jsonify(response)
 
 @app.route('/api/firewall-rule/toggle', methods=['POST'])
@@ -421,6 +445,131 @@ def toggle_firewall_rule():
             
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+
+@app.route('/api/generate-report', methods=['GET'])
+def generate_report():
+    """Generate and auto-download a full network risk report using cached data if available."""
+    try:
+        reports_dir = os.path.join(os.getcwd(), "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+
+        now = time()
+        cache_age = now - CACHE["timestamp"]
+
+        # Use cache if fresh (<5 minutes)
+        use_cache = cache_age < CACHE_TTL and all([
+            CACHE["system_info"],
+            CACHE["firewall_rules"],
+            CACHE["port_scan"]
+        ])
+
+        if use_cache:
+            print("Using cached dashboard data for report generation")
+            system_data = CACHE["system_info"]
+            rules_data = CACHE["firewall_rules"]
+            ports_data = CACHE["port_scan"]
+        else:
+            print("Cache expired — regenerating full data")
+            system_data = json.loads(get_system_info().data)
+            rules_data = json.loads(get_firewall_rules_api().data)
+            ports_data = json.loads(get_port_scan().data)
+
+        # Extract relevant info
+        system_info = system_data.get("system_info", {})
+        uptime = system_data.get("uptime", "N/A")
+        firewall_status = system_data.get("firewall_status", {})
+        rdp_status = system_data.get("rdp_status", {})
+        firewall_rules = rules_data.get("rules", [])
+        ports = ports_data.get("ports", [])
+
+        # Risk summary
+        high_risk_rules = sum(1 for r in firewall_rules if r.get("risk_level") == "High")
+        high_risk_ports = sum(1 for p in ports if p.get("risk") == "High")
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # --- Build report text ---
+        report_lines = [
+            "=" * 60,
+            f"Network Security Risk Report - Generated {timestamp}",
+            "=" * 60,
+            "",
+            "[SYSTEM INFORMATION]",
+            f"OS Name: {system_info.get('OS Name', 'N/A')}",
+            f"OS Version: {system_info.get('OS Version', 'N/A')}",
+            f"System Type: {system_info.get('System Type', 'N/A')}",
+            f"Uptime: {uptime}",
+            "",
+            "[FIREWALL STATUS]",
+            json.dumps(firewall_status, indent=4),
+            "",
+            "[REMOTE DESKTOP STATUS]",
+            f"Enabled: {rdp_status.get('enabled', False)}",
+            f"Status: {rdp_status.get('status', 'N/A')}",
+            "",
+            "[SUMMARY]",
+            f"Total Firewall Rules: {len(firewall_rules)}",
+            f"High-Risk Firewall Rules: {high_risk_rules}",
+            f"Total Open Ports: {len(ports)}",
+            f"High-Risk Open Ports: {high_risk_ports}",
+            "",
+            "-" * 60,
+            "DETAILED FIREWALL RULE ANALYSIS (All Rules)",
+            "-" * 60,
+        ]
+
+        # 🔥 Include all firewall rules
+        for rule in firewall_rules:
+            risk_level = rule.get("risk_level", "N/A")
+            risk_reasons = rule.get("risk_reasons", [])
+            report_lines.append(
+                f"\nRule Name: {rule.get('display_name', rule.get('name', 'N/A'))}\n"
+                f"Direction: {rule.get('direction', 'N/A')}\n"
+                f"Action: {rule.get('action', 'N/A')}\n"
+                f"Profile: {rule.get('profile', 'N/A')}\n"
+                f"Enabled: {rule.get('enabled', 'N/A')}\n"
+                f"Protocol: {rule.get('protocol', 'N/A')}\n"
+                f"Local Ports: {rule.get('local_ports', 'N/A')}\n"
+                f"Remote Ports: {rule.get('remote_ports', 'N/A')}\n"
+                f"Program: {rule.get('program', 'N/A')}\n"
+                f"Service: {rule.get('service', 'N/A')}\n"
+                f"Risk Level: {risk_level}\n"
+                f"Reasons: {', '.join(risk_reasons)}\n"
+                f"{'-'*50}"
+            )
+
+        # Ports section
+        report_lines.append("\n" + "-" * 60)
+        report_lines.append("DETAILED PORT SCAN RESULTS (All Ports)")
+        report_lines.append("-" * 60)
+
+        for p in ports:
+            report_lines.append(
+                f"\nPort: {p.get('port', 'N/A')}\n"
+                f"Protocol: {p.get('protocol', 'N/A')}\n"
+                f"Process: {p.get('process_name', 'N/A')} (PID: {p.get('pid', 'N/A')})\n"
+                f"Status: {p.get('status', 'N/A')}\n"
+                f"Risk: {p.get('risk', 'N/A')} - {p.get('risk_description', '')}\n"
+                f"{'-'*50}"
+            )
+
+        # Write to file
+        report_text = "\n".join(report_lines)
+        filename = f"network_risk_report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+        filepath = os.path.join(reports_dir, filename)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(report_text)
+
+        # Auto-download
+        return send_file(filepath, as_attachment=True, download_name=filename, mimetype="text/plain")
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))  # Use Render's port
