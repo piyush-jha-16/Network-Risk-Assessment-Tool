@@ -21,12 +21,6 @@ A comprehensive full-stack web application for automated network security assess
 - Risk assessment for each firewall configuration
 - Profile-based security analysis (Domain/Private/Public)
 
-### One-Click Security Hardening
-- Automated security remediation actions
-- Guest account management
-- Service disabling capabilities
-- Firewall configuration enforcement
-
 ### Report Generation
 - Comprehensive PDF security reports
 - Executive summaries and detailed findings

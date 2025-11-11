@@ -3,8 +3,6 @@ import subprocess
 from datetime import datetime
 import json
 import os
-from subprocess import PIPE
-
 
 app = Flask(__name__)
 
@@ -42,7 +40,6 @@ def parse_system_info(output):
 def get_uptime(boot_time_str):
     """Calculate system uptime using multiple reliable methods."""
     try:
-        # Method 3: Fallback to WMIC
         wmic_result = run_command('wmic os get lastbootuptime /format:value')
         if 'LastBootUpTime' in wmic_result:
             for line in wmic_result.split('\n'):
@@ -68,15 +65,15 @@ def check_windows_version_vulnerabilities(os_version):
     vulnerabilities = []
     if '10.0.1' in os_version:
         vulnerabilities.append("Outdated Windows 10 version - multiple known vulnerabilities")
-    if '6.1' in os_version:  # Windows 7
+    if '6.1' in os_version:  
         vulnerabilities.append("Windows 7 - End of life, critically vulnerable")
-    if '6.3' in os_version:  # Windows 8.1
+    if '6.3' in os_version:  
         vulnerabilities.append("Windows 8.1 - Consider upgrading to Windows 10/11")
-    if '19041' in os_version:  # Windows 10 2004
+    if '19041' in os_version: 
         vulnerabilities.append("Windows 10 2004 - Ensure all latest updates are installed")
     return vulnerabilities
 
-# 🔥 FIREWALL CHECK
+# FIREWALL CHECK
 def check_firewall_status():
     """Check if Windows Firewall is enabled for all profiles"""
     try:
@@ -101,7 +98,7 @@ def check_firewall_status():
         print(f"Firewall check error: {e}")
         return {'error': str(e)}
 
-# 🖥️ REMOTE DESKTOP CHECK
+# REMOTE DESKTOP CHECK
 def check_remote_desktop():
     try:
         command = 'powershell "Get-ItemProperty -Path \'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\' -Name fDenyTSConnections | ConvertTo-Json"'
@@ -114,7 +111,7 @@ def check_remote_desktop():
     except Exception as e:
         return {'error': str(e)}
 
-# 🔎 GET FIREWALL RULES
+# GET FIREWALL RULES
 
 def get_firewall_rules():
     """Fetch firewall rules without requiring admin privileges."""
@@ -147,9 +144,6 @@ def get_firewall_rules():
         print("Raw output:", result.stdout)
         return []
 
-
-
-
 def analyze_firewall_rule_risk(rule):
     """Analyze risk level for a firewall rule with enum mapping and normalization."""
     risk_level = "Low"
@@ -178,10 +172,6 @@ def analyze_firewall_rule_risk(rule):
 
     enabled_value = str(rule.get('Enabled', '')).strip().lower()
     local_port = str(rule.get('LocalPort', 'any')).strip().lower()
-
-    # Debug print – check actual data
-    # print(f"DEBUG RULE: {rule}")
-    # print(f"→ Parsed direction={direction}, action={action}, profile={profile_text}, port={local_port}")
 
     # --- Skip disabled rules ---
     if enabled_value not in ('true', 'yes', '1'):
@@ -214,9 +204,87 @@ def analyze_firewall_rule_risk(rule):
 
     return {'risk_level': risk_level, 'reasons': reasons}
 
-
-    
-
+# PORT SCANNING FUNCTION - Added from friend's code
+def scan_ports():
+    """Enhanced port scanning with better risk assessment"""
+    try:
+        # Use netstat to get open ports and processes
+        command = 'netstat -ano'
+        result = run_command(command)
+        
+        ports_data = []
+        lines = result.split('\n')
+        
+        for line in lines:
+            if 'TCP' in line or 'UDP' in line:
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    protocol = parts[0]
+                    local_address = parts[1]
+                    state = parts[3] if len(parts) > 3 else 'LISTENING'
+                    pid = parts[-1]
+                    
+                    # Extract port number
+                    if ':' in local_address:
+                        port = local_address.split(':')[-1]
+                        
+                        # Get process name from PID
+                        process_name = "Unknown"
+                        if pid != '0':
+                            try:
+                                process_cmd = f'tasklist /fi "PID eq {pid}" /fo csv /nh'
+                                process_result = run_command(process_cmd)
+                                if ',' in process_result:
+                                    process_name = process_result.split(',')[0].replace('"', '')
+                            except:
+                                process_name = "Unknown"
+                        
+                        # Enhanced risk assessment
+                        risk = "Low"
+                        risk_description = "Standard service port"
+                        
+                        # High risk ports
+                        high_risk_ports = {
+                            '23': 'Telnet - Unencrypted, disable immediately',
+                            '21': 'FTP - Plain text credentials',
+                            '135': 'RPC - Can be exploited for enumeration',
+                            '139': 'NetBIOS - Information disclosure',
+                            '445': 'SMB - Vulnerable to worm attacks'
+                        }
+                        
+                        # Medium risk ports
+                        medium_risk_ports = {
+                            '3389': 'RDP - Ensure strong authentication',
+                            '1433': 'SQL Server - Secure configuration needed',
+                            '1434': 'SQL Browser - Information disclosure',
+                            '5900': 'VNC - Unencrypted by default',
+                            '8080': 'HTTP Proxy - Common attack target'
+                        }
+                        
+                        if port in high_risk_ports:
+                            risk = "High"
+                            risk_description = high_risk_ports[port]
+                        elif port in medium_risk_ports:
+                            risk = "Medium"
+                            risk_description = medium_risk_ports[port]
+                        elif port in ['80', '443', '22']:
+                            risk = "Low"
+                            risk_description = "Standard web/SSH service"
+                        
+                        ports_data.append({
+                            'port': port,
+                            'protocol': protocol,
+                            'status': state,
+                            'process_name': process_name,
+                            'pid': pid,
+                            'risk': risk,
+                            'risk_description': risk_description
+                        })
+        
+        return ports_data[:50]  # Return first 50 results
+        
+    except Exception as e:
+        return {'error': str(e)}
 
 @app.route('/')
 def index():
@@ -302,6 +370,22 @@ def get_firewall_rules_api():
             'success': True,
             'rules': rules_with_risk,
             'total_rules': len(rules_with_risk),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+    except Exception as e:
+        response = {'success': False, 'error': str(e)}
+    return jsonify(response)
+
+# PORT SCAN API ENDPOINT - Added from friend's code
+@app.route('/api/port-scan')
+def get_port_scan():
+    try:
+        ports_data = scan_ports()
+        
+        response = {
+            'success': True,
+            'ports': ports_data,
+            'total_ports': len(ports_data),
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
     except Exception as e:

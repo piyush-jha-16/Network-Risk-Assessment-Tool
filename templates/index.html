@@ -71,6 +71,11 @@
         .success-animation {
             animation: success 0.5s ease;
         }
+        
+        /* Port risk styling */
+        .risk-high { background-color: #f8d7da !important; }
+        .risk-medium { background-color: #fff3cd !important; }
+        .risk-low { background-color: #d1ecf1 !important; }
     </style>
 </head>
 <body class="bg-light">
@@ -156,6 +161,7 @@
                             <button class="btn btn-primary btn-sm" onclick="scanPorts()">
                                 <i class="fas fa-search me-1"></i>Scan Open Ports
                             </button>
+                            <span class="badge bg-secondary ms-2" id="portScanTimestamp">Last scan: Never</span>
                         </div>
                         <div class="table-responsive">
                             <table id="portResultsTable" class="table table-sm table-hover" style="width:100%">
@@ -167,49 +173,17 @@
                                         <th>Process Name</th>
                                         <th>PID</th>
                                         <th>Risk</th>
+                                        <th>Risk Description</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr><td colspan="6" class="text-center">Please click on Scan Open Ports.</td></tr>
+                                    <tr><td colspan="7" class="text-center">Please click on Scan Open Ports.</td></tr>
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
 
-                <!-- One-Click Hardening Card -->
-                <div class="card mb-4">
-                    <div class="card-header bg-success text-white">
-                        <h5 class="card-title mb-0"><i class="fas fa-wrench me-2"></i>One-Click Security Hardening</h5>
-                    </div>
-                    <div class="card-body">
-                        <p class="text-muted">Click a button below to automatically remediate a common security risk.</p>
-                        <div class="row">
-                            <div class="col-md-4 mb-2">
-                                <div class="d-grid gap-2">
-                                    <button class="btn btn-outline-danger" onclick="hardenDisableGuest()">
-                                        <i class="fas fa-user-slash me-2"></i>Disable Guest Account
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mb-2">
-                                <div class="d-grid gap-2">
-                                    <button class="btn btn-outline-danger" onclick="hardenEnableFirewall()">
-                                        <i class="fas fa-shield-alt me-2"></i>Enable Windows Firewall
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mb-2">
-                                <div class="d-grid gap-2">
-                                    <button class="btn btn-outline-danger" onclick="hardenDisableTelnet()">
-                                        <i class="fas fa-ban me-2"></i>Disable Telnet Service
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
                 <!-- Generate Report Button -->
                 <div class="card">
                     <div class="card-body p-0">
@@ -257,12 +231,7 @@
         }
     }
 
-    // Placeholder functions for button clicks
-    function runFullScan() { 
-        showToast('Full assessment started...', 'info');
-        enableGenerateReportButton();
-    }
-    
+    // Placeholder function for report generation
     function generateReport() {
         if (!scanCompleted) return;
         
@@ -279,10 +248,80 @@
         }, 500);
     }
     
+    // Port Scanning Function
     function scanPorts() { 
         showToast('Scanning for open ports...', 'info');
-        $('#portResultsTable').DataTable().clear().draw();
-        enableGenerateReportButton();
+        
+        fetch('/api/port-scan')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayPortScanResults(data);
+                    showToast(`Found ${data.total_ports} open ports`, 'success');
+                    enableGenerateReportButton();
+                } else {
+                    showToast('Error scanning ports: ' + data.error, 'danger');
+                    $('#portResultsTable').DataTable().clear().draw();
+                }
+            })
+            .catch(error => {
+                showToast('Failed to scan ports', 'danger');
+                console.error('Error:', error);
+                $('#portResultsTable').DataTable().clear().draw();
+            });
+    }
+
+    function displayPortScanResults(data) {
+        const table = $('#portResultsTable').DataTable();
+        table.clear();
+        
+        if (data.ports && data.ports.length > 0) {
+            data.ports.forEach(port => {
+                // Determine risk badge class and row class
+                let riskClass = 'secondary';
+                let rowClass = '';
+                switch(port.risk) {
+                    case 'High': 
+                        riskClass = 'danger';
+                        rowClass = 'risk-high';
+                        break;
+                    case 'Medium': 
+                        riskClass = 'warning';
+                        rowClass = 'risk-medium';
+                        break;
+                    case 'Low': 
+                        riskClass = 'success';
+                        rowClass = 'risk-low';
+                        break;
+                    default: 
+                        riskClass = 'secondary';
+                }
+                
+                // Add row to table
+                const rowNode = table.row.add([
+                    port.port || 'N/A',
+                    port.protocol || 'N/A',
+                    port.status || 'N/A',
+                    port.process_name || 'Unknown',
+                    port.pid || 'N/A',
+                    `<span class="badge bg-${riskClass}">${port.risk}</span>`,
+                    port.risk_description || 'Standard service port'
+                ]).draw(false).node();
+                
+                // Add risk class to the row
+                $(rowNode).addClass(rowClass);
+            });
+        } else {
+            // Add empty state message
+            table.row.add([
+                'No open ports found',
+                '-', '-', '-', '-', '-', '-'
+            ]).draw();
+        }
+        
+        // Update timestamp
+        document.getElementById('portScanTimestamp').textContent = 
+            `Last scan: ${data.timestamp}`;
     }
 
     // Firewall Rules Functions
@@ -448,23 +487,6 @@
         $('body').append(modalHtml);
         const modal = new bootstrap.Modal(document.getElementById('ruleDetailsModal'));
         modal.show();
-    }
-
-    // Placeholder functions for hardening actions
-    function hardenDisableGuest() {
-        if(confirm('Are you sure you want to disable the Guest account?')) {
-            showToast('Disabling Guest account...', 'warning');
-        }
-    }
-    function hardenEnableFirewall() {
-        if(confirm('Are you sure you want to enable the Windows Firewall for all profiles?')) {
-            showToast('Enabling Windows Firewall...', 'warning');
-        }
-    }
-    function hardenDisableTelnet() {
-        if(confirm('Are you sure you want to disable the Telnet service? This cannot be undone.')) {
-            showToast('Disabling Telnet service...', 'warning');
-        }
     }
 
     // System Information Functions
@@ -703,10 +725,6 @@
             `Last refresh: ${data.timestamp}`;
     }
 
-    function showSystemInfo() {
-        loadSystemInfo();
-    }
-
     // Initialize DataTables with proper empty data
     $(document).ready(function() {
         $('#portResultsTable').DataTable({
@@ -717,8 +735,16 @@
                 { title: "Status" },
                 { title: "Process Name" },
                 { title: "PID" },
-                { title: "Risk" }
-            ]
+                { title: "Risk" },
+                { title: "Risk Description" }
+            ],
+            pageLength: 10,
+            order: [[5, 'desc']],
+            language: {
+                search: "Search ports:",
+                zeroRecords: "No open ports found"
+            },
+            responsive: true
         });
         
         // Enhanced firewall rules table configuration
